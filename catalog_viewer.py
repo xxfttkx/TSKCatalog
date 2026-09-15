@@ -913,8 +913,12 @@ class Handler(BaseHTTPRequestHandler):
 
         where, args = [], []
         if q:
-            where.append("rel LIKE ?")
-            args.append(f"%{q}%")
+            # 空格分隔多关键词，每个关键词 AND，且同时匹配 rel 和 path
+            for kw in q.split():
+                if not kw:
+                    continue
+                where.append("(rel LIKE ? OR path LIKE ?)")
+                args.extend([f"%{kw}%", f"%{kw}%"])
         if cat:
             where.append("category = ?")
             args.append(cat)
