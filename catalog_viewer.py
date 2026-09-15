@@ -735,9 +735,9 @@ def build_character_index():
             if c["_thumb"] is None or score < c["_thumb"][0]:
                 c["_thumb"] = (score, r["path"])
 
-        # 播放优先级：m0 → m1 → b → f → c（1 系角色普遍带 m0；
-        # 部分 2xx/3xx 只有 m1 或 b，按此顺序回退）
-        play_priority = ("m0", "m1", "b", "f", "c")
+        # 角色图鉴点 Spine 时默认播放的变体：m1（战斗服）优先，
+        # 没有则 m0（校服），再没有按 b → f → c 回退
+        play_priority = ("m1", "m0", "b", "f", "c")
 
         items = []
         for cid in sorted(chars):

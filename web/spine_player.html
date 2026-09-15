@@ -276,7 +276,7 @@ async function main() {
   // 变体切换下拉（同角色的 m0/m1/b/c/f 等），切换时带新 path 重载页面
   const vSel = $("variantSel");
   if (parts.siblings && parts.siblings.length > 1 && vSel.options.length === 0) {
-    const VARIANT_NAME = {m0: "常服", m1: "战斗服"};
+    const VARIANT_NAME = {m0: "校服", m1: "战斗服"};
     for (const s of parts.siblings) {
       const o = document.createElement("option");
       o.value = s.path;
@@ -408,6 +408,17 @@ async function main() {
     variantSel.value = variantSkins[0].name;
   }
 
+  // 默认隐藏 *_close 类 slot（如 face_eye_close 闭眼），由动画控制显隐。
+  // setup pose 会同时挂上睁眼和闭眼附件导致重影，需手动清空闭眼附件。
+  // 默认隐藏 *_close 类 slot（如 face_eye_close 闭眼），由动画控制显隐。
+  // setup pose 会同时挂上睁眼和闭眼附件导致重影，需手动清空闭眼附件。
+  function hideCloseSlots() {
+    for (const slot of skeleton.slots) {
+      const sn = slot.data.name || '';
+      if (sn.indexOf('_close') >= 0) slot.attachment = null;
+    }
+  }
+
   function applySkin() {
     if (!allSkins.length) return;
     const base = allSkins.find(s => s.name === skinSel.value);
@@ -421,6 +432,7 @@ async function main() {
     skeleton.setSkin(combined);
     // 切 skin 后必须重置姿势并重新 apply，否则附件不会刷新
     skeleton.setSlotsToSetupPose();
+    hideCloseSlots();
     state.apply(skeleton);
     skeleton.updateWorldTransform();
     bounds = computeBounds();
@@ -483,6 +495,9 @@ async function main() {
   }
   function setAnim(name) {
     state.clearTracks();
+    // 切动画前重置到 setup pose，清除上一个动画残留的骨骼/槽/附件状态
+    skeleton.setToSetupPose();
+    hideCloseSlots();
     state.setAnimation(0, name, true);
     state.apply(skeleton);
     skeleton.updateWorldTransform();
@@ -551,6 +566,8 @@ async function main() {
     if (dt > 0.05) dt = 0.05;
     if (!paused) {
       state.update(dt);
+      skeleton.setToSetupPose();
+      hideCloseSlots();
       state.apply(skeleton);
       skeleton.updateWorldTransform();
     }

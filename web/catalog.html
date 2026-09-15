@@ -167,15 +167,6 @@
   .chara-actions button + button { border-left: 1px solid #f0f0f0; }
   .chara-actions button:not(:disabled):hover { background: #eef4fa; color: #2b6cb0; }
   .chara-actions button:disabled { color: #ccc; cursor: default; background: none; }
-  .chara-variants {
-    display: none; flex-wrap: wrap; gap: 4px; padding: 8px;
-    border-top: 1px solid #f0f0f0; background: #fafafa;
-  }
-  .chara-variants button {
-    border: 1px solid #d8d8d8; background: #fff; border-radius: 4px;
-    padding: 4px 10px; font-size: 12px; color: #555; cursor: pointer;
-  }
-  .chara-variants button:hover { background: #eaf2fa; border-color: #9db8cf; color: #2b6cb0; }
   #charaSentinel { text-align: center; padding: 16px; color: #999; font-size: 13px; grid-column: 1/-1; }
   #modal-foot {
     padding: 10px 18px; border-top: 1px solid #e5e5e5; display: flex; gap: 10px; justify-content: flex-end;
@@ -601,8 +592,8 @@ function appendCharaCard(c) {
   const idHtml = isMain
     ? `<span class="chara-id" title="游戏内 ID：${esc(c.id)}">${esc(c.wiki_id)}</span>`
     : `<span class="chara-id" style="color:#999;" title="该编号无 wiki 6 位对应">${esc(c.id)}</span>`;
-  // 变体含义（已知：m0=常服、m1=战斗服；其他字母暂按原样显示）
-  const VARIANT_NAME = {m0: "常服", m1: "战斗服"};
+  // 变体含义（已知：m0=校服、m1=战斗服；其他字母暂按原样显示）
+  const VARIANT_NAME = {m0: "校服", m1: "战斗服"};
   meta.innerHTML =
     idHtml +
     `<span class="vbadges">${c.variants.map(v =>
@@ -616,40 +607,21 @@ function appendCharaCard(c) {
   bRes.onclick = () => showCharaResources(c);
   actions.appendChild(bRes);
 
-  if (c.spine_variants.length) {
-    // Spine 按钮：点击展开/收起变体选择
-    const bSpine = document.createElement("button");
-    bSpine.textContent = "Spine ▾";
-    const variantsRow = document.createElement("div");
-    variantsRow.className = "chara-variants";
-    variantsRow.style.display = "none";
-    for (const v of c.spine_variants) {
-      const vb = document.createElement("button");
-      const label = v.variant.toUpperCase() +
-        (VARIANT_NAME[v.variant] ? " " + VARIANT_NAME[v.variant] : "");
-      vb.textContent = label;
-      vb.title = `播放 ${v.variant} 变体`;
-      vb.onclick = () => openSpine({
-        path: v.path, rel: `ch_${c.id}_${v.variant}.skel.bytes`,
-        kind: "spine", bundle_hex: v.bundle, remote: v.remote,
-      });
-      variantsRow.appendChild(vb);
-    }
-    bSpine.onclick = () => {
-      const open = variantsRow.style.display !== "none";
-      variantsRow.style.display = open ? "none" : "flex";
-      bSpine.textContent = open ? "Spine ▾" : "Spine ▴";
-    };
-    actions.appendChild(bSpine);
-    card.appendChild(actions);
-    card.appendChild(variantsRow);
-  } else {
-    const bSpine = document.createElement("button");
-    bSpine.textContent = "Spine";
+  // Spine 按钮：点击直接播放默认变体（m1 战斗服，无则 m0 校服，再无则回退）
+  const bSpine = document.createElement("button");
+  bSpine.textContent = "Spine";
+  const def = c.spine_variants.find(v => v.variant === c.play_variant);
+  if (!def) {
     bSpine.disabled = true;
-    actions.appendChild(bSpine);
-    card.appendChild(actions);
+  } else {
+    bSpine.title = `播放 ${def.variant.toUpperCase()}${VARIANT_NAME[def.variant] ? " " + VARIANT_NAME[def.variant] : ""}`;
+    bSpine.onclick = () => openSpine({
+      path: def.path, rel: `ch_${c.id}_${def.variant}.skel.bytes`,
+      kind: "spine", bundle_hex: def.bundle, remote: def.remote,
+    });
   }
+  actions.appendChild(bSpine);
+  card.appendChild(actions);
 
   $("charaGrid").insertBefore(card, $("charaSentinel"));
 }
