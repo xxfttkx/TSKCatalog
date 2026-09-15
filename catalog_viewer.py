@@ -731,19 +731,17 @@ def build_character_index():
             c["variants"] = sorted(c["variants"])
             c["thumb_path"] = c.pop("_thumb")[1] if c["_thumb"] else ""
             bundles = c.pop("spine_bundles")
+            # 返回每个变体的播放信息，前端可自由选择
+            c["spine_variants"] = [
+                {"variant": v,
+                 "path": ("Assets/AssetBundles/Characters/HighQuality/general/"
+                          f"ch_{cid}/ch_{cid}_{v}.skel.bytes"),
+                 "bundle": bundles[v][0],
+                 "remote": bundles[v][1]}
+                for v in c["variants"] if v in bundles
+            ]
             play = next((v for v in play_priority if v in bundles), None)
-            if play:
-                c["play_variant"] = play
-                c["play_path"] = (
-                    "Assets/AssetBundles/Characters/HighQuality/general/"
-                    f"ch_{cid}/ch_{cid}_{play}.skel.bytes")
-                c["play_bundle"] = bundles[play][0]
-                c["play_remote"] = bundles[play][1]
-            else:
-                c["play_variant"] = ""
-                c["play_path"] = ""
-                c["play_bundle"] = ""
-                c["play_remote"] = 0
+            c["play_variant"] = play or ""
             items.append(c)
 
         _CHARACTER_CACHE["md5"] = md5

@@ -167,6 +167,15 @@
   .chara-actions button + button { border-left: 1px solid #f0f0f0; }
   .chara-actions button:not(:disabled):hover { background: #eef4fa; color: #2b6cb0; }
   .chara-actions button:disabled { color: #ccc; cursor: default; background: none; }
+  .chara-variants {
+    display: none; flex-wrap: wrap; gap: 4px; padding: 8px;
+    border-top: 1px solid #f0f0f0; background: #fafafa;
+  }
+  .chara-variants button {
+    border: 1px solid #d8d8d8; background: #fff; border-radius: 4px;
+    padding: 4px 10px; font-size: 12px; color: #555; cursor: pointer;
+  }
+  .chara-variants button:hover { background: #eaf2fa; border-color: #9db8cf; color: #2b6cb0; }
   #charaSentinel { text-align: center; padding: 16px; color: #999; font-size: 13px; grid-column: 1/-1; }
   #modal-foot {
     padding: 10px 18px; border-top: 1px solid #e5e5e5; display: flex; gap: 10px; justify-content: flex-end;
@@ -605,19 +614,42 @@ function appendCharaCard(c) {
   const bRes = document.createElement("button");
   bRes.textContent = "资源";
   bRes.onclick = () => showCharaResources(c);
-  const bSpine = document.createElement("button");
-  bSpine.textContent = "Spine";
-  if (!c.play_path) bSpine.disabled = true;
-  else {
-    bSpine.title = `播放 ${c.play_variant}${VARIANT_NAME[c.play_variant] ? "（" + VARIANT_NAME[c.play_variant] + "）" : ""}`;
-    bSpine.onclick = () => openSpine({
-      path: c.play_path, rel: `ch_${c.id}_${c.play_variant}.skel.bytes`,
-      kind: "spine", bundle_hex: c.play_bundle, remote: c.play_remote,
-    });
-  }
   actions.appendChild(bRes);
-  actions.appendChild(bSpine);
-  card.appendChild(actions);
+
+  if (c.spine_variants.length) {
+    // Spine 按钮：点击展开/收起变体选择
+    const bSpine = document.createElement("button");
+    bSpine.textContent = "Spine ▾";
+    const variantsRow = document.createElement("div");
+    variantsRow.className = "chara-variants";
+    variantsRow.style.display = "none";
+    for (const v of c.spine_variants) {
+      const vb = document.createElement("button");
+      const label = v.variant.toUpperCase() +
+        (VARIANT_NAME[v.variant] ? " " + VARIANT_NAME[v.variant] : "");
+      vb.textContent = label;
+      vb.title = `播放 ${v.variant} 变体`;
+      vb.onclick = () => openSpine({
+        path: v.path, rel: `ch_${c.id}_${v.variant}.skel.bytes`,
+        kind: "spine", bundle_hex: v.bundle, remote: v.remote,
+      });
+      variantsRow.appendChild(vb);
+    }
+    bSpine.onclick = () => {
+      const open = variantsRow.style.display !== "none";
+      variantsRow.style.display = open ? "none" : "flex";
+      bSpine.textContent = open ? "Spine ▾" : "Spine ▴";
+    };
+    actions.appendChild(bSpine);
+    card.appendChild(actions);
+    card.appendChild(variantsRow);
+  } else {
+    const bSpine = document.createElement("button");
+    bSpine.textContent = "Spine";
+    bSpine.disabled = true;
+    actions.appendChild(bSpine);
+    card.appendChild(actions);
+  }
 
   $("charaGrid").insertBefore(card, $("charaSentinel"));
 }
