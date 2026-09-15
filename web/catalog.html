@@ -125,6 +125,49 @@
   }
   #modal-msg { color: #a06000; font-size: 14px; line-height: 2; }
   #spineFrame { width: 100%; height: 74vh; border: 0; display: block; }
+
+  /* 角色图鉴 */
+  .chara-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px; padding: 16px 24px 40px;
+  }
+  .chara-card {
+    border: 1px solid #e3e3e3; border-radius: 6px; background: #fff;
+    position: relative; overflow: hidden;
+  }
+  .chara-card:hover { border-color: #9db8cf; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .chara-thumb {
+    width: 100%; aspect-ratio: 1; object-fit: contain;
+    background: #f7f8fa; display: block;
+  }
+  .chara-noimg {
+    display: flex; align-items: center; justify-content: center;
+    color: #bbb; font-size: 12px;
+  }
+  .chara-meta {
+    padding: 6px 8px; font-size: 12px; color: #555;
+    display: flex; justify-content: space-between; align-items: center; gap: 4px;
+  }
+  .chara-id { font-family: Consolas, monospace; color: #444; }
+  .vbadges { display: flex; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+  .vbadge {
+    font-size: 10px; color: #8a5a00; border: 1px solid #e3cf9e;
+    background: #fdf8ed; border-radius: 3px; padding: 0 3px; line-height: 16px;
+  }
+  .r18-tag {
+    position: absolute; top: 5px; left: 5px; z-index: 1;
+    background: #c0392b; color: #fff; font-size: 10px;
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .chara-actions { display: flex; border-top: 1px solid #f0f0f0; }
+  .chara-actions button {
+    flex: 1; border: none; border-radius: 0; background: none;
+    padding: 6px 0; font-size: 12px; color: #555;
+  }
+  .chara-actions button + button { border-left: 1px solid #f0f0f0; }
+  .chara-actions button:not(:disabled):hover { background: #eef4fa; color: #2b6cb0; }
+  .chara-actions button:disabled { color: #ccc; cursor: default; background: none; }
+  #charaSentinel { text-align: center; padding: 16px; color: #999; font-size: 13px; grid-column: 1/-1; }
   #modal-foot {
     padding: 10px 18px; border-top: 1px solid #e5e5e5; display: flex; gap: 10px; justify-content: flex-end;
   }
@@ -137,6 +180,7 @@
     <h1>Twinkle Star Knights X · Catalog 远程资源浏览器</h1>
     <div class="tabs">
       <button id="tabBrowser" class="active">资源浏览</button>
+      <button id="tabChara">角色图鉴</button>
       <button id="tabDiff">版本对比</button>
     </div>
   </div>
@@ -186,6 +230,33 @@
     <tbody id="rows"></tbody>
     <tfoot><tr id="more-row"><td colspan="5"><button id="btnMore">加载更多</button></td></tr></tfoot>
   </table>
+</div>
+
+<!-- ============ 角色图鉴 ============ -->
+<div class="view" id="viewChara">
+  <div class="toolbar">
+    <div class="search-row">
+      <input type="text" id="cQ" placeholder="输入角色 ID，如 001001 / 1001001（游戏内 7 位 = wiki 6 位前加 1）" autocomplete="off">
+      <button class="primary" id="cBtnSearch">搜索</button>
+      <button id="cBtnClear">清除</button>
+    </div>
+    <div class="filter-row">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+        <input type="checkbox" id="cSpine"> 仅有 Spine 模型
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+        <input type="checkbox" id="cAdult"> 仅 R18
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+        <input type="checkbox" id="cAll"> 显示全部编号（含 2xx / 3xx，这些编号在 wiki 上没有对应 6 位 ID）
+      </label>
+      <span style="color:#aaa;font-size:12px;">头像来自游戏内 Thumb 缩略图；B/C/F/M0/M1 是该角色拥有的 Spine 变体；卡片上的 6 位 ID 即 wiki 角色 ID</span>
+    </div>
+  </div>
+  <div id="charaInfo" style="padding:10px 24px 0;color:#888;font-size:13px;">点击上方"角色图鉴"加载。</div>
+  <div class="chara-grid" id="charaGrid">
+    <div id="charaSentinel" style="display:none;"></div>
+  </div>
 </div>
 
 <!-- ============ 版本对比 ============ -->
@@ -271,12 +342,15 @@ function esc(s) {
 
 // ---------------- 视图切换 ----------------
 function switchView(name) {
-  $("tabBrowser").classList.toggle("active", name === "browser");
-  $("tabDiff").classList.toggle("active", name === "diff");
-  $("viewBrowser").classList.toggle("active", name === "browser");
-  $("viewDiff").classList.toggle("active", name === "diff");
+  for (const n of ["browser", "chara", "diff"]) {
+    $("tab" + ({browser:"Browser", chara:"Chara", diff:"Diff"}[n]))
+      .classList.toggle("active", name === n);
+    $("view" + ({browser:"Browser", chara:"Chara", diff:"Diff"}[n]))
+      .classList.toggle("active", name === n);
+  }
 }
 $("tabBrowser").onclick = () => switchView("browser");
+$("tabChara").onclick = () => { switchView("chara"); ensureCharacters(); };
 $("tabDiff").onclick = () => { switchView("diff"); loadSnapshots(); };
 
 // ---------------- 资源浏览 ----------------
@@ -433,6 +507,156 @@ function openSpine(it) {
 
 $("btnClose").onclick = closeModal;
 $("mask").onclick = e => { if (e.target === $("mask")) closeModal(); };
+
+// ---------------- 角色图鉴 ----------------
+const cstate = {page: 0, total: 0, loading: false, done: true, loaded: false};
+
+function charaParams() {
+  const p = new URLSearchParams();
+  const q = $("cQ").value.trim();
+  if (q) p.set("q", q);
+  if ($("cSpine").checked) p.set("spine", "1");
+  if ($("cAdult").checked) p.set("adult", "1");
+  if ($("cAll").checked) p.set("all", "1");
+  return p;
+}
+
+async function loadCharacters(reset) {
+  if (cstate.loading) return;
+  cstate.loading = true;
+  const sentinel = $("charaSentinel");
+  if (reset) {
+    cstate.page = 0; cstate.done = false;
+    // 清空除 sentinel 外的所有卡片
+    for (const el of [...$("charaGrid").children]) {
+      if (el !== sentinel) el.remove();
+    }
+  }
+  sentinel.style.display = "";
+  sentinel.textContent = "加载中 ...";
+  cstate.page += 1;
+  const p = charaParams();
+  p.set("page", cstate.page); p.set("size", 60);
+  try {
+    const d = await (await fetch("/api/characters?" + p.toString())).json();
+    cstate.total = d.total;
+    $("charaInfo").textContent = `共找到 ${d.total.toLocaleString()} 名角色`;
+    for (const c of d.items) appendCharaCard(c);
+    cstate.done = document.querySelectorAll(".chara-card").length >= d.total;
+    sentinel.style.display = cstate.done ? "none" : "";
+    sentinel.textContent = cstate.done ? "" : "向下滚动加载更多";
+    if (reset && d.total === 0) {
+      sentinel.style.display = "";
+      sentinel.textContent = "没有匹配的角色";
+    }
+  } catch (e) {
+    sentinel.textContent = "加载失败：" + e;
+  } finally {
+    cstate.loading = false;
+  }
+}
+
+function appendCharaCard(c) {
+  const card = document.createElement("div");
+  card.className = "chara-card";
+
+  if (c.adult) {
+    const tag = document.createElement("span");
+    tag.className = "r18-tag"; tag.textContent = "R18";
+    card.appendChild(tag);
+  }
+
+  if (c.thumb_path) {
+    const img = document.createElement("img");
+    img.className = "chara-thumb";
+    img.alt = c.wiki_id; img.loading = "lazy";
+    img.src = "/api/preview?max_width=200&path=" + encodeURIComponent(c.thumb_path);
+    img.addEventListener("error", () => {
+      const ph = document.createElement("div");
+      ph.className = "chara-thumb chara-noimg";
+      ph.textContent = "无头像";
+      img.replaceWith(ph);
+    }, {once: true});
+    card.appendChild(img);
+  } else {
+    const ph = document.createElement("div");
+    ph.className = "chara-thumb chara-noimg";
+    ph.textContent = "无头像";
+    card.appendChild(ph);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "chara-meta";
+  // 1 系角色显示 wiki 使用的 6 位 ID；2xx/3xx 无对应 wiki ID，显示完整 7 位
+  const isMain = c.id[0] === "1";
+  const idHtml = isMain
+    ? `<span class="chara-id" title="游戏内 ID：${esc(c.id)}">${esc(c.wiki_id)}</span>`
+    : `<span class="chara-id" style="color:#999;" title="该编号无 wiki 6 位对应">${esc(c.id)}</span>`;
+  // 变体含义（已知：m0=常服、m1=战斗服；其他字母暂按原样显示）
+  const VARIANT_NAME = {m0: "常服", m1: "战斗服"};
+  meta.innerHTML =
+    idHtml +
+    `<span class="vbadges">${c.variants.map(v =>
+      `<span class="vbadge" title="${esc(VARIANT_NAME[v] || "")}">${esc(v.toUpperCase())}</span>`).join("")}</span>`;
+  card.appendChild(meta);
+
+  const actions = document.createElement("div");
+  actions.className = "chara-actions";
+  const bRes = document.createElement("button");
+  bRes.textContent = "资源";
+  bRes.onclick = () => showCharaResources(c);
+  const bSpine = document.createElement("button");
+  bSpine.textContent = "Spine";
+  if (!c.play_path) bSpine.disabled = true;
+  else {
+    bSpine.title = `播放 ${c.play_variant}${VARIANT_NAME[c.play_variant] ? "（" + VARIANT_NAME[c.play_variant] + "）" : ""}`;
+    bSpine.onclick = () => openSpine({
+      path: c.play_path, rel: `ch_${c.id}_${c.play_variant}.skel.bytes`,
+      kind: "spine", bundle_hex: c.play_bundle, remote: c.play_remote,
+    });
+  }
+  actions.appendChild(bRes);
+  actions.appendChild(bSpine);
+  card.appendChild(actions);
+
+  $("charaGrid").insertBefore(card, $("charaSentinel"));
+}
+
+function showCharaResources(c) {
+  // 用纯数字 ID 搜索，可同时匹配 ch_{id}（Spine）与 chara_{id}（头像/CG）
+  switchView("browser");
+  $("q").value = c.id;
+  $("fCategory").value = "";
+  $("fKind").value = "";
+  state.bundle = "";
+  $("bundleFilter").style.display = "none";
+  loadPage(true);
+}
+
+function ensureCharacters() {
+  if (!cstate.loaded) {
+    cstate.loaded = true;
+    loadCharacters(true);
+  }
+}
+
+// 滚动到 sentinel 时自动加载下一页
+new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting && !cstate.done && cstate.loaded) {
+    loadCharacters(false);
+  }
+}).observe($("charaSentinel"));
+
+$("cBtnSearch").onclick = () => loadCharacters(true);
+$("cQ").addEventListener("keydown", e => { if (e.key === "Enter") loadCharacters(true); });
+$("cBtnClear").onclick = () => {
+  $("cQ").value = ""; $("cSpine").checked = false; $("cAdult").checked = false;
+  $("cAll").checked = false;
+  loadCharacters(true);
+};
+$("cSpine").onchange = () => loadCharacters(true);
+$("cAdult").onchange = () => loadCharacters(true);
+$("cAll").onchange = () => loadCharacters(true);
 
 // ---------------- 版本对比 ----------------
 function fmtSnap(s) {

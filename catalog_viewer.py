@@ -638,6 +638,121 @@ def db_connect():
     return conn
 
 
+# ---------------------------------------------------------------------------
+# 角色图鉴聚合
+#
+# 资源里的角色 ID 为 7 位（如 1001005），wiki 等资料站使用的 6 位 ID 是去掉
+# 首位后的结果（1001005 -> 001005）。每个角色通常带 b/c/f/m0/m1 五个 Spine
+# 变体；头像使用 Sprites/Chara/Thumb_* 下游戏自带的缩略图，无需外链 wiki。
+# ---------------------------------------------------------------------------
+
+_CH_SKEL_RE = re.compile(r"^ch_(\d{7})_([a-z0-9]+)\.skel\.bytes$")
+_CHARA_IMG_RE = re.compile(r"^chara_(\d{7})_(\d+)_(\d+)\.png$")
+_CHARACTER_CACHE = {"md5": None, "items": None}
+
+# 头像选图优先级里的变体后缀排名（_2_1 是常规头像，数量最多）
+_SUFFIX_RANK = {(2, 1): 0, (1, 1): 1, (2, 2): 2}
+
+
+def build_character_index():
+    """聚合角色列表：Spine 变体 / R18 标记 / m0 播放信息 / 最优头像路径。"""
+    db = db_connect()
+    try:
+        row = db.execute("SELECT value FROM meta WHERE key='catalog_md5'").fetchone()
+        md5 = row[0] if row else ""
+        if _CHARACTER_CACHE["md5"] == md5 and _CHARACTER_CACHE["items"] is not None:
+            return _CHARACTER_CACHE["items"]
+
+        chars = {}
+
+        def get(cid):
+            c = chars.get(cid)
+            if c is None:
+                c = {"id": cid, "wiki_id": cid[1:], "variants": set(),
+                     "adult": False, "spine_bundles": {}, "_thumb": None}
+                chars[cid] = c
+            return c
+
+        # 1) 高清 general 版 Spine（变体集合 + 各变体播放所需 bundle 信息）
+        rows = db.execute(
+            "SELECT name, bundle_hex, remote FROM resources "
+            "WHERE category='spine_chara' AND kind='spine' AND path LIKE ?",
+            ("Assets/AssetBundles/Characters/HighQuality/general/%",)).fetchall()
+        for r in rows:
+            m = _CH_SKEL_RE.match(r["name"])
+            if not m or m.group(1) == "0000000":
+                continue
+            cid, variant = m.group(1), m.group(2)
+            c = get(cid)
+            c["variants"].add(variant)
+            c["spine_bundles"][variant] = (r["bundle_hex"], r["remote"])
+
+        # 2) 是否存在 R18 版 Spine
+        rows = db.execute(
+            "SELECT DISTINCT name FROM resources "
+            "WHERE category='spine_chara' AND kind='spine' AND path LIKE ?",
+            ("Assets/AssetBundles/Characters/HighQuality/adult/%",)).fetchall()
+        for r in rows:
+            m = _CH_SKEL_RE.match(r["name"])
+            if m and m.group(1) != "0000000":
+                get(m.group(1))["adult"] = True
+
+        # 3) 头像：(general 优先, Thumb 编号升序, _2_1 优先) 取分最低者
+        rows = db.execute(
+            "SELECT path, rel, name FROM resources "
+            "WHERE category='chara_img' AND kind='image' "
+            "AND rel LIKE 'Sprites/Chara/Thumb%'").fetchall()
+        for r in rows:
+            m = _CHARA_IMG_RE.match(r["name"])
+            if not m or m.group(1) == "0000000":
+                continue
+            parts = r["rel"].split("/")
+            is_adult = "adult" in parts
+            thumb_no = 999
+            for seg in parts:
+                if seg.startswith("Thumb_"):
+                    try:
+                        thumb_no = int(seg.split("_")[1])
+                    except (IndexError, ValueError):
+                        pass
+            rank = _SUFFIX_RANK.get((int(m.group(2)), int(m.group(3))), 3)
+            score = (1 if is_adult else 0, thumb_no, rank)
+            c = get(m.group(1))
+            if c["_thumb"] is None or score < c["_thumb"][0]:
+                c["_thumb"] = (score, r["path"])
+
+        # 播放优先级：m0 → m1 → b → f → c（1 系角色普遍带 m0；
+        # 部分 2xx/3xx 只有 m1 或 b，按此顺序回退）
+        play_priority = ("m0", "m1", "b", "f", "c")
+
+        items = []
+        for cid in sorted(chars):
+            c = chars[cid]
+            c["variants"] = sorted(c["variants"])
+            c["thumb_path"] = c.pop("_thumb")[1] if c["_thumb"] else ""
+            bundles = c.pop("spine_bundles")
+            play = next((v for v in play_priority if v in bundles), None)
+            if play:
+                c["play_variant"] = play
+                c["play_path"] = (
+                    "Assets/AssetBundles/Characters/HighQuality/general/"
+                    f"ch_{cid}/ch_{cid}_{play}.skel.bytes")
+                c["play_bundle"] = bundles[play][0]
+                c["play_remote"] = bundles[play][1]
+            else:
+                c["play_variant"] = ""
+                c["play_path"] = ""
+                c["play_bundle"] = ""
+                c["play_remote"] = 0
+            items.append(c)
+
+        _CHARACTER_CACHE["md5"] = md5
+        _CHARACTER_CACHE["items"] = items
+        return items
+    finally:
+        db.close()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CatalogViewer/1.0"
 
@@ -694,6 +809,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_stats()
             if route == "/api/categories":
                 return self.api_categories()
+            if route == "/api/characters":
+                return self.api_characters(qs)
             if route == "/api/resources":
                 return self.api_resources(qs)
             if route == "/api/preview":
@@ -740,6 +857,39 @@ class Handler(BaseHTTPRequestHandler):
             db.close()
         self._json([{"key": r["category"], "label": CATEGORY_LABELS.get(r["category"], r["category"]),
                      "count": r["c"]} for r in rows])
+
+    # -- 角色图鉴 -----------------------------------------------------------
+    def api_characters(self, qs):
+        q = qs.get("q", [""])[0].strip()
+        only_spine = qs.get("spine", [""])[0] == "1"
+        only_adult = qs.get("adult", [""])[0] == "1"
+        # 默认只看 1xxxxxx（wiki 角色一覧对应的可抽取角色）；all=1 时包含
+        # 2xxxxxx / 3xxxxxx 等特殊与剧情模型
+        show_all = qs.get("all", [""])[0] == "1"
+        page = max(1, int(qs.get("page", ["1"])[0] or 1))
+        size = min(200, max(10, int(qs.get("size", ["60"])[0] or 60)))
+
+        items = build_character_index()
+        filtered = []
+        for c in items:
+            if not show_all and c["id"][0] != "1":
+                continue
+            if only_spine and not c["variants"]:
+                continue
+            if only_adult and not c["adult"]:
+                continue
+            if q:
+                # 纯 6 位数字视为 wiki ID，只匹配 1 系；其余按子串匹配
+                if re.fullmatch(r"\d{6}", q):
+                    if not (c["id"][0] == "1" and c["wiki_id"] == q):
+                        continue
+                elif q not in c["id"] and q not in c["wiki_id"]:
+                    continue
+            filtered.append(c)
+        total = len(filtered)
+        start = (page - 1) * size
+        self._json({"total": total, "page": page, "size": size,
+                    "items": filtered[start:start + size]})
 
     def api_resources(self, qs):
         q = (qs.get("q", [""])[0].strip())
