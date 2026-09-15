@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Spine 播放器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-weight: normal; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: #fff; color: #2b2b2b; font-size: 13px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 14px; border-bottom: 1px solid #e3e3e3; background: #fafafa;
+  }
+  .bar .title { font-size: 13px; color: #333; max-width: 340px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar label { color: #777; }
+  select, button {
+    font-size: 12px; padding: 4px 9px; border: 1px solid #cfcfcf;
+    border-radius: 4px; background: #fff; color: #333; font-family: inherit;
+  }
+  button { cursor: pointer; }
+  button:hover { background: #eef4fa; border-color: #9db8cf; }
+  .ver { color: #2b6cb0; font-size: 12px; }
+  .hint { color: #999; font-size: 12px; }
+  #stage { flex: 1; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #msg {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #a06000; font-size: 14px;
+    background: #fafafa; text-align: center; padding: 20px;
+  }
+  #err {
+    position: absolute; inset: 0; display: none; align-items: center;
+    justify-content: center; color: #b03030; font-size: 14px;
+    background: #fdf3f3; text-align: center; padding: 24px; white-space: pre-wrap;
+  }
+  .checker {
+    background-image:
+      linear-gradient(45deg, #e8e8e8 25%, transparent 25%),
+      linear-gradient(-45deg, #e8e8e8 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #e8e8e8 75%),
+      linear-gradient(-45deg, transparent 75%, #e8e8e8 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="title" id="title">加载中 ...</span>
+  <label>皮肤</label>
+  <select id="skin" style="min-width:160px;"></select>
+  <label>动画</label>
+  <select id="anim" style="min-width:180px;"></select>
+  <button id="btnPause">暂停</button>
+  <button id="btnReset">重置姿势</button>
+  <button id="btnFit">适应窗口</button>
+  <label>背景</label>
+  <select id="bg">
+    <option value="white">白色</option>
+    <option value="checker">棋盘格</option>
+    <option value="dark">深色</option>
+  </select>
+  <span class="ver" id="ver"></span>
+  <span class="hint">滚轮缩放 · 拖拽平移 · 双击适应</span>
+</div>
+<div id="stage">
+  <canvas id="canvas"></canvas>
+  <div id="msg">正在下载并解析 Spine 资源 ...</div>
+  <div id="err"></div>
+</div>
+
+<script src="/vendor/spine-webgl-4.0.31.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+function fail(msg) {
+  $("msg").style.display = "none";
+  const e = $("err");
+  e.style.display = "flex";
+  e.textContent = msg;
+}
+
+// Spine 4.0 二进制: int32 lowHash + int32 highHash + 字符串(版本号)
+// 字符串编码: varint 计数，0=null、1=空串，否则实际字节数 = 计数 - 1
+function readSkelVersion(bytes) {
+  try {
+    let p = 8, count = 0, shift = 0, b;
+    do { b = bytes[p++]; count |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
+    if (count <= 1) return "";
+    return new TextDecoder("utf-8").decode(bytes.subarray(p, p + count - 1));
+  } catch (_) { return ""; }
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("贴图加载失败: " + url));
+    img.src = url;
+  });
+}
+
+async function main() {
+  const params = new URLSearchParams(location.search);
+  const skelPath = params.get("path");
+  if (!skelPath) return fail("缺少 path 参数");
+
+  const partsResp = await fetch("/api/spine_parts?path=" + encodeURIComponent(skelPath));
+  if (!partsResp.ok) return fail("部件查询失败: " + (await partsResp.text()));
+  const parts = await partsResp.json();
+  if (!parts.atlas) return fail("该单元缺少 atlas 文本，无法渲染");
+  if (!parts.textures.length) return fail("该单元缺少贴图，无法渲染");
+  $("title").textContent = parts.name;
+
+  const [atlasText, skelBuf] = await Promise.all([
+    fetch(parts.atlas.url).then(r => r.text()),
+    fetch(parts.skel.url).then(r => r.arrayBuffer()),
+  ]);
+  const skelBytes = new Uint8Array(skelBuf);
+  const version = readSkelVersion(skelBytes);
+  const major = version.split(".").slice(0, 2).join(".");
+  $("ver").textContent = version ? ("Spine " + version) : "";
+  if (version && major !== "4.0") {
+    return fail("运行时仅内置 Spine 4.0，该资源版本为 " + version + "，暂不支持渲染。\n可下载 bundle 后用对应版本 Spine 编辑器/运行时查看。");
+  }
+
+  // 贴图：atlas 页名 -> HTMLImageElement
+  const imagesByBase = {};
+  await Promise.all(parts.textures.map(async t => {
+    const blob = await fetch(t.url).then(r => r.blob());
+    const img = await loadImage(URL.createObjectURL(blob));
+    imagesByBase[t.rel.split("/").pop()] = img;
+  }));
+
+  const canvas = $("canvas");
+  const gl = canvas.getContext("webgl", {alpha: false, antialias: true, preserveDrawingBuffer: true});
+  if (!gl) return fail("浏览器不支持 WebGL");
+
+  const mgl = new spine.ManagedWebGLRenderingContext(gl);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+
+  const atlas = new spine.TextureAtlas(atlasText);
+  for (const page of atlas.pages) {
+    const img = imagesByBase[page.name] || imagesByBase[Object.keys(imagesByBase)[0]];
+    if (!img) return fail("atlas 引用的贴图缺失: " + page.name);
+    page.setTexture(new spine.GLTexture(mgl, img, false));
+  }
+
+  const binary = new spine.SkeletonBinary(new spine.AtlasAttachmentLoader(atlas));
+  binary.scale = 1;
+  let skeletonData;
+  try {
+    skeletonData = binary.readSkeletonData(skelBytes);
+  } catch (e) {
+    return fail("骨骼数据解析失败: " + e);
+  }
+
+  const skeleton = new spine.Skeleton(skeletonData);
+  skeleton.setToSetupPose();
+  const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+  const animNames = skeletonData.animations.map(a => a.name);
+  const animSel = $("anim");
+  for (const n of animNames) {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    animSel.appendChild(o);
+  }
+
+  // ---- 皮肤（Skin）列表：表情通常以 skin 形式存在 ----
+  // skins 是 Skin 对象数组；default 永远在首位，其余按名字排序
+  const skinNames = skeletonData.skins.map(s => s.name);
+  const skinSel = $("skin");
+  // 没有 default 时也要补一个，便于回到初始状态
+  if (!skinNames.includes("default")) skinNames.unshift("default");
+  for (const n of skinNames) {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n === "default" ? "默认" : n;
+    skinSel.appendChild(o);
+  }
+  function setSkin(name) {
+    skeleton.setSkinByName(name);
+    // 切 skin 后必须重置姿势并重新 apply，否则附件不会刷新
+    skeleton.setSlotsToSetupPose();
+    state.apply(skeleton);
+    skeleton.updateWorldTransform();
+    bounds = computeBounds();
+    fitView();
+  }
+
+  const batcher = new spine.PolygonBatcher(mgl, false);
+  const renderer = new spine.SkeletonRenderer(mgl, false);
+  const shader = spine.Shader.newColoredTextured(mgl);
+  const camera = new spine.OrthoCamera(canvas.clientWidth, canvas.clientHeight);
+
+  // ---- 视口/缩放 ----
+  let userZoom = null, userX = null, userY = null;
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    camera.setViewport(w, h);
+  }
+  function computeBounds() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const scratch = new Float32Array(2048);
+    for (const slot of skeleton.drawOrder) {
+      if (!slot.bone.active) continue;
+      const att = slot.getAttachment();
+      if (!att || !(att instanceof spine.RegionAttachment || att instanceof spine.MeshAttachment)) continue;
+      const n = att.worldVerticesLength;
+      const buf = n * 2 <= scratch.length ? scratch : new Float32Array(n * 2);
+      // RegionAttachment 在 4.0 是 4 参数版本(bone, worldVertices, offset, stride)
+      // MeshAttachment 是 6 参数版本(slot, start, count, worldVertices, offset, stride)
+      if (att instanceof spine.RegionAttachment) {
+        att.computeWorldVertices(slot.bone, buf, 0, 2);
+      } else {
+        att.computeWorldVertices(slot, 0, n, buf, 0, 2);
+      }
+      for (let i = 0; i < n; i += 2) {
+        const x = buf[i], y = buf[i + 1];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+    if (!isFinite(minX)) {
+      // 回退到导出尺寸
+      minX = skeletonData.x || 0; minY = skeletonData.y || 0;
+      maxX = minX + (skeletonData.width || 100); maxY = minY + (skeletonData.height || 100);
+    }
+    return {minX, minY, maxX, maxY,
+            w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY),
+            cx: (minX + maxX) / 2, cy: (minY + maxY) / 2};
+  }
+  let bounds;
+  function fitView() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    camera.zoom = Math.max(bounds.w / (w * 0.86), bounds.h / (h * 0.86));
+    camera.position.x = bounds.cx;
+    camera.position.y = bounds.cy;
+    userZoom = userX = userY = null;
+  }
+  function setAnim(name) {
+    state.clearTracks();
+    state.setAnimation(0, name, true);
+    state.apply(skeleton);
+    skeleton.updateWorldTransform();
+    bounds = computeBounds();
+    fitView();
+  }
+
+  // ---- 背景 ----
+  function applyBg() {
+    const v = $("bg").value;
+    canvas.style.background = v === "dark" ? "#2b2b2b" : "";
+    canvas.classList.toggle("checker", v === "checker");
+    gl.clearColor(v === "dark" ? 0.17 : 1, v === "dark" ? 0.17 : 1, v === "dark" ? 0.17 : 1, 1);
+  }
+
+  // ---- 交互 ----
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const base = userZoom != null ? userZoom : camera.zoom;
+    const z = Math.min(20, Math.max(0.005, base * (e.deltaY > 0 ? 1.12 : 0.89)));
+    camera.zoom = z; userZoom = z;
+  }, {passive: false});
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener("mousedown", e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener("mouseup", () => dragging = false);
+  window.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    camera.position.x -= dx * camera.zoom;
+    camera.position.y += dy * camera.zoom;
+    userX = camera.position.x; userY = camera.position.y;
+  });
+  canvas.addEventListener("dblclick", () => fitView());
+
+  animSel.addEventListener("change", () => setAnim(animSel.value));
+  skinSel.addEventListener("change", () => setSkin(skinSel.value));
+  $("btnPause").onclick = function () {
+    paused = !paused;
+    this.textContent = paused ? "继续" : "暂停";
+  };
+  let paused = false;
+  $("btnReset").onclick = () => {
+    skeleton.setToSetupPose();
+    state.clearTracks();
+    state.setAnimation(0, animSel.value, true);
+    fitView();
+  };
+  $("btnFit").onclick = () => fitView();
+  $("bg").onchange = applyBg;
+  window.addEventListener("resize", resize);
+
+  // ---- 主循环 ----
+  resize();
+  applyBg();
+  setAnim(animNames.length ? animNames[0] : "");
+  $("msg").style.display = "none";
+
+  let last = performance.now();
+  function frame(now) {
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.05) dt = 0.05;
+    if (!paused) {
+      state.update(dt);
+      state.apply(skeleton);
+      skeleton.updateWorldTransform();
+    }
+    camera.update();
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    shader.bind();
+    shader.setUniform4x4f(spine.Shader.MVP_MATRIX, camera.projectionView.values);
+    batcher.begin(shader);
+    renderer.premultipliedAlpha = false;
+    renderer.draw(batcher, skeleton);
+    batcher.end();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+main().catch(e => fail(String(e && e.stack || e)));
+</script>
+</body>
+</html>

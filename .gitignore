@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 自动生成的索引和缓存（build 后自动重建）
+catalog_index.db
+catalog_index.db.tmp
+catalog_cache/
+snapshots/
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~

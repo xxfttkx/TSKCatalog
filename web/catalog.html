@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TSKX Catalog 远程资源浏览器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-weight: normal; }
+  body {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: #ffffff; color: #2b2b2b; font-size: 14px;
+  }
+  header {
+    padding: 16px 24px 0; border-bottom: 1px solid #e3e3e3;
+  }
+  header .top { display: flex; justify-content: space-between; align-items: flex-end; }
+  header h1 { font-size: 19px; color: #1f1f1f; }
+  #stats { margin-top: 8px; color: #777; font-size: 13px; padding-bottom: 10px; }
+  #stats span { margin-right: 18px; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button {
+    border: 1px solid transparent; border-bottom: none; background: none;
+    padding: 8px 18px; font-size: 14px; color: #777; border-radius: 6px 6px 0 0;
+  }
+  .tabs button.active { color: #2b6cb0; background: #f2f8fd; border-color: #e3e3e3; }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .toolbar { padding: 14px 24px; border-bottom: 1px solid #ececec; }
+  .search-row { display: flex; gap: 8px; align-items: center; }
+  .filter-row { display: flex; gap: 14px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .filter-row label { color: #666; font-size: 13px; }
+  input[type=text] {
+    width: 360px; max-width: 56vw; padding: 7px 10px;
+    border: 1px solid #cfcfcf; border-radius: 4px; font-size: 14px; outline: none;
+  }
+  input[type=text]:focus { border-color: #8ab4d8; }
+  select {
+    padding: 6px 8px; border: 1px solid #cfcfcf; border-radius: 4px;
+    font-size: 13px; background: #fff; min-width: 120px; outline: none; max-width: 300px;
+  }
+  button {
+    padding: 7px 16px; border: 1px solid #c2c2c2; background: #f7f7f7;
+    border-radius: 4px; cursor: pointer; font-size: 13px; color: #333; font-family: inherit;
+  }
+  button:hover { background: #eef4fa; border-color: #9db8cf; }
+  button.primary { background: #eaf2fa; border-color: #9db8cf; }
+  button:disabled { color: #aaa; cursor: default; background: #f7f7f7; }
+
+  #bundleFilter {
+    display: none; margin-top: 10px; font-size: 13px; color: #8a5a00;
+    background: #fdf6e8; border: 1px solid #e8d9b8; border-radius: 4px;
+    padding: 6px 12px; width: fit-content;
+  }
+  #bundleFilter button { margin-left: 10px; padding: 2px 10px; }
+
+  #result-info, #diff-info { padding: 10px 24px 4px; color: #888; font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; padding: 8px 12px; font-size: 12px; color: #999;
+    border-bottom: 1px solid #e3e3e3; position: sticky; top: 0; background: #fff;
+  }
+  tbody td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+  tbody tr:hover { background: #f8fbfe; }
+  .rel { color: #333; word-break: break-all; }
+  .dir { color: #9a9a9a; font-size: 12px; }
+  .tag {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 12px; border: 1px solid #ddd; color: #666; white-space: nowrap;
+  }
+  .tag.image { color: #2b6cb0; border-color: #bcd6ec; background: #f2f8fd; }
+  .tag.text  { color: #4a7a4a; border-color: #c4dec4; background: #f4faf4; }
+  .tag.spine { color: #8a5a00; border-color: #e3cf9e; background: #fdf8ed; }
+  .tag.audio { color: #7a4a9a; border-color: #d6bde6; background: #f9f3fd; }
+  .st-added   { color: #2f7d3f; border-color: #bfe0c8; background: #f1faf3; }
+  .st-removed { color: #a04545; border-color: #e4c4c4; background: #fbf2f2; }
+  .st-changed { color: #8a5a00; border-color: #e3cf9e; background: #fdf8ed; }
+  .hex {
+    font-family: Consolas, monospace; font-size: 12px; color: #666;
+    cursor: pointer; text-decoration: underline dotted #bbb;
+  }
+  .hexchange { font-family: Consolas, monospace; font-size: 11px; color: #888; }
+  .hexchange .to { color: #2f7d3f; }
+  .remote-dot { font-size: 11px; color: #aaa; margin-left: 4px; }
+  .actions { white-space: nowrap; text-align: right; }
+  .actions button { padding: 3px 10px; font-size: 12px; margin-left: 4px; }
+  .actions button.dl { color: #777; }
+
+  #more-row td { text-align: center; padding: 16px; }
+  .loading { padding: 10px 24px; color: #999; display: none; }
+  .summary { display: flex; gap: 10px; padding: 12px 24px 0; flex-wrap: wrap; }
+  .summary .card {
+    border: 1px solid #e3e3e3; border-radius: 6px; padding: 8px 16px; font-size: 13px;
+  }
+  .summary .card b { font-size: 18px; margin-left: 6px; }
+  .summary .card.added b { color: #2f7d3f; }
+  .summary .card.removed b { color: #a04545; }
+  .summary .card.changed b { color: #8a5a00; }
+
+  /* 预览弹层 */
+  #mask {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    z-index: 50; justify-content: center; align-items: center;
+  }
+  #modal {
+    background: #fff; border-radius: 8px; width: 86vw; max-width: 1500px;
+    max-height: 94vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  #modal.spine { width: 94vw; }
+  #modal-head {
+    padding: 12px 18px; border-bottom: 1px solid #e5e5e5;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  }
+  #modal-title { font-size: 14px; word-break: break-all; }
+  #modal-head button { padding: 2px 12px; }
+  #modal-status { font-size: 12px; color: #999; margin-top: 4px; }
+  #modal-body { overflow: auto; padding: 16px 18px; text-align: center; background: #fafafa; }
+  #modal.spine #modal-body { padding: 0; overflow: hidden; background: #fff; }
+  #modal-body img { max-width: 100%; }
+  #modal-body pre {
+    text-align: left; white-space: pre-wrap; word-break: break-all;
+    font-family: Consolas, monospace; font-size: 12px; color: #444;
+  }
+  #modal-msg { color: #a06000; font-size: 14px; line-height: 2; }
+  #spineFrame { width: 100%; height: 74vh; border: 0; display: block; }
+  #modal-foot {
+    padding: 10px 18px; border-top: 1px solid #e5e5e5; display: flex; gap: 10px; justify-content: flex-end;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="top">
+    <h1>Twinkle Star Knights X · Catalog 远程资源浏览器</h1>
+    <div class="tabs">
+      <button id="tabBrowser" class="active">资源浏览</button>
+      <button id="tabDiff">版本对比</button>
+    </div>
+  </div>
+  <div id="stats"><span>正在加载统计 ...</span></div>
+</header>
+
+<!-- ============ 资源浏览 ============ -->
+<div class="view active" id="viewBrowser">
+  <div class="toolbar">
+    <div class="search-row">
+      <input type="text" id="q" placeholder="搜索资源路径，如 ch_3394004、SkillTitle、PictureBook" autocomplete="off">
+      <button class="primary" id="btnSearch">搜索</button>
+      <button id="btnClear">清除</button>
+    </div>
+    <div class="filter-row">
+      <label>分类</label>
+      <select id="fCategory"><option value="">全部分类</option></select>
+      <label style="margin-left:20px;">类型</label>
+      <select id="fKind">
+        <option value="">全部类型</option>
+        <option value="image">图片</option>
+        <option value="text">文本</option>
+        <option value="spine">Spine</option>
+        <option value="audio">音频</option>
+        <option value="other">其他</option>
+      </select>
+    </div>
+    <div id="bundleFilter">
+      当前仅显示 bundle <code id="bundleHex"></code> 内的资源
+      <button id="btnClearBundle">显示全部</button>
+    </div>
+  </div>
+
+  <div id="result-info"></div>
+  <div class="loading" id="loading">加载中 ...</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:52%;">资源路径</th>
+        <th style="width:9%;">类型</th>
+        <th style="width:12%;">分类</th>
+        <th style="width:17%;">所属 bundle</th>
+        <th style="width:10%;"></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+    <tfoot><tr id="more-row"><td colspan="5"><button id="btnMore">加载更多</button></td></tr></tfoot>
+  </table>
+</div>
+
+<!-- ============ 版本对比 ============ -->
+<div class="view" id="viewDiff">
+  <div class="toolbar">
+    <div class="filter-row" style="margin-top:0;">
+      <label>旧版本</label>
+      <select id="dFrom" style="min-width:260px;"></select>
+      <span style="color:#999;">→</span>
+      <label>新版本</label>
+      <select id="dTo" style="min-width:260px;"></select>
+      <button class="primary" id="btnCompare">对比</button>
+    </div>
+    <div class="filter-row">
+      <label>状态</label>
+      <select id="dStatus">
+        <option value="">全部状态</option>
+        <option value="added">新增</option>
+        <option value="removed">消失</option>
+        <option value="changed">换包（内容更新）</option>
+      </select>
+      <label style="margin-left:20px;">分类</label>
+      <select id="dCategory"><option value="">全部分类</option></select>
+      <label style="margin-left:20px;">关键字</label>
+      <input type="text" id="dQ" placeholder="如 ch_3、SkillTitle" style="width:240px;">
+      <span class="hint" id="snapHint" style="color:#a06000;"></span>
+    </div>
+  </div>
+
+  <div class="summary" id="diffSummary" style="display:none;">
+    <div class="card added">新增<b id="sumAdded">0</b></div>
+    <div class="card removed">消失<b id="sumRemoved">0</b></div>
+    <div class="card changed">换包<b id="sumChanged">0</b></div>
+  </div>
+  <div id="diff-info">选择两个版本快照后点"对比"。每次执行 build（含 --remote）都会自动保存当前 catalog 为快照。</div>
+  <div class="loading" id="diffLoading">对比中 ...</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:52%;">资源路径</th>
+        <th style="width:10%;">状态</th>
+        <th style="width:13%;">分类</th>
+        <th style="width:18%;">bundle 变化</th>
+        <th style="width:7%;"></th>
+      </tr>
+    </thead>
+    <tbody id="diffRows"></tbody>
+    <tfoot><tr id="diffMoreRow" style="display:none;"><td colspan="5"><button id="btnDiffMore">加载更多</button></td></tr></tfoot>
+  </table>
+</div>
+
+<div id="mask">
+  <div id="modal">
+    <div id="modal-head">
+      <div>
+        <div id="modal-title"></div>
+        <div id="modal-status"></div>
+      </div>
+      <button id="btnClose">关闭</button>
+    </div>
+    <div id="modal-body"></div>
+    <div id="modal-foot">
+      <a id="btnDlBundle"><button>下载整个 bundle</button></a>
+    </div>
+  </div>
+</div>
+
+<script>
+const KIND_LABEL = {image:"图片", text:"文本", spine:"Spine", audio:"音频", other:"其他"};
+const STATUS_LABEL = {added:"新增", removed:"消失", changed:"换包"};
+const PAGE_SIZE = 100;
+let state = {page: 0, total: 0, loading: false, done: false, bundle: ""};
+let dstate = {page: 0, total: 0, loading: false, done: true, from: "", to: ""};
+let snapshots = [];
+
+const $ = id => document.getElementById(id);
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ---------------- 视图切换 ----------------
+function switchView(name) {
+  $("tabBrowser").classList.toggle("active", name === "browser");
+  $("tabDiff").classList.toggle("active", name === "diff");
+  $("viewBrowser").classList.toggle("active", name === "browser");
+  $("viewDiff").classList.toggle("active", name === "diff");
+}
+$("tabBrowser").onclick = () => switchView("browser");
+$("tabDiff").onclick = () => { switchView("diff"); loadSnapshots(); };
+
+// ---------------- 资源浏览 ----------------
+function currentParams() {
+  const p = new URLSearchParams();
+  const q = $("q").value.trim();
+  if (q) p.set("q", q);
+  if ($("fCategory").value) p.set("category", $("fCategory").value);
+  if ($("fKind").value) p.set("kind", $("fKind").value);
+  if (state.bundle) p.set("bundle", state.bundle);
+  return p;
+}
+
+async function loadStats() {
+  const s = await (await fetch("/api/stats")).json();
+  $("stats").innerHTML =
+    `<span>资源总数：<b>${s.resources.toLocaleString()}</b></span>` +
+    `<span>bundle：<b>${s.bundles.toLocaleString()}</b></span>` +
+    `<span>catalog md5：${s.catalog_md5 || "?"}</span>`;
+}
+
+async function loadCategories(sel) {
+  const cats = await (await fetch("/api/categories")).json();
+  for (const s of sel) {
+    const cur = s.value;
+    s.innerHTML = '<option value="">全部分类</option>' +
+      cats.map(c => `<option value="${c.key}">${c.label} (${c.count.toLocaleString()})</option>`).join("");
+    s.value = cur;
+  }
+}
+
+function pathSplit(rel) {
+  const slash = rel.lastIndexOf("/");
+  return [slash >= 0 ? rel.slice(0, slash + 1) : "", slash >= 0 ? rel.slice(slash + 1) : rel];
+}
+
+async function loadPage(reset) {
+  if (state.loading) return;
+  state.loading = true;
+  $("loading").style.display = "block";
+  if (reset) { state.page = 0; state.done = false; $("rows").innerHTML = ""; }
+  state.page += 1;
+  const p = currentParams();
+  p.set("page", state.page); p.set("size", PAGE_SIZE);
+  try {
+    const d = await (await fetch("/api/resources?" + p.toString())).json();
+    state.total = d.total;
+    $("result-info").textContent = `共找到 ${d.total.toLocaleString()} 个资源`;
+    for (const it of d.items) appendResourceRow(it);
+    state.done = $("rows").children.length >= d.total;
+    $("btnMore").parentElement.style.display = state.done ? "none" : "";
+  } catch (e) {
+    $("result-info").textContent = "加载失败：" + e;
+  } finally {
+    state.loading = false;
+    $("loading").style.display = "none";
+  }
+}
+
+function appendResourceRow(it) {
+  const [dir, file] = pathSplit(it.rel);
+  const tr = document.createElement("tr");
+  tr.innerHTML =
+    `<td class="rel"><span class="dir">${esc(dir)}</span>${esc(file)}</td>` +
+    `<td><span class="tag ${it.kind}">${KIND_LABEL[it.kind] || it.kind}</span></td>` +
+    `<td><span class="tag">${esc(it.category_label)}</span></td>` +
+    `<td><span class="hex" title="只看该 bundle 内的资源">${it.bundle_hex.slice(0,12)}…</span>` +
+        `<span class="remote-dot">${it.remote ? "远程" : "内置"}</span></td>` +
+    `<td class="actions"><button class="pv">预览</button>` +
+        `<button class="dl" title="下载整个 bundle">包</button></td>`;
+  tr.querySelector(".hex").onclick = () => {
+    state.bundle = it.bundle_hex;
+    $("bundleHex").textContent = it.bundle_hex;
+    $("bundleFilter").style.display = "block";
+    loadPage(true);
+  };
+  tr.querySelector(".pv").onclick = () => openPreview(it);
+  tr.querySelector(".dl").onclick = () => downloadBundle(it.path);
+  $("rows").appendChild(tr);
+}
+
+function downloadBundle(path) {
+  location.href = "/api/download_bundle?path=" + encodeURIComponent(path);
+}
+
+// ---------------- 预览弹层 ----------------
+function openModal(title, spineMode) {
+  $("mask").style.display = "flex";
+  $("modal").classList.toggle("spine", !!spineMode);
+  $("modal-title").textContent = title;
+  $("modal-status").textContent = "";
+  $("modal-foot").style.display = "flex";
+  $("modal-body").innerHTML = spineMode
+    ? ""
+    : '<div id="modal-msg">正在从 CDN 获取 bundle 并解码，请稍候 ...</div>';
+}
+
+function closeModal() {
+  $("mask").style.display = "none";
+  $("modal-body").innerHTML = "";   // 清空 iframe，停止 WebGL/动画
+  $("modal").classList.remove("spine");
+}
+
+function openPreview(it) {
+  if (it.kind === "spine") return openSpine(it);
+  openModal(it.rel, false);
+  $("btnDlBundle").href = "/api/download_bundle?path=" + encodeURIComponent(it.path);
+  if (it.kind !== "image" && it.kind !== "text") {
+    $("modal-body").innerHTML = `<div id="modal-msg">该类型（${KIND_LABEL[it.kind] || it.kind}）不支持网页预览，请下载 bundle。</div>`;
+    return;
+  }
+  (async () => {
+    try {
+      const resp = await fetch("/api/preview?max_width=1600&path=" + encodeURIComponent(it.path));
+      if (!resp.ok) {
+        let msg = "HTTP " + resp.status;
+        try { msg = (await resp.json()).error || msg; } catch (_) {}
+        $("modal-body").innerHTML = `<div id="modal-msg">${esc(msg)}<br>可以下载整个 bundle 后用 UnityPy 查看。</div>`;
+        return;
+      }
+      const ctype = resp.headers.get("Content-Type") || "";
+      if (ctype.startsWith("image/")) {
+        const url = URL.createObjectURL(await resp.blob());
+        const size = resp.headers.get("X-Image-Size") || "";
+        $("modal-status").textContent = (size ? "原始尺寸 " + size + "（已限宽 1600）  ·  " : "") + "bundle：" + it.bundle_hex;
+        $("modal-body").innerHTML = "";
+        const img = document.createElement("img");
+        img.src = url;
+        img.title = "点击查看原图大小版本";
+        img.onclick = () => window.open("/api/preview?max_width=0&path=" + encodeURIComponent(it.path));
+        $("modal-body").appendChild(img);
+      } else {
+        const text = await resp.text();
+        $("modal-status").textContent = "文本资源 · bundle：" + it.bundle_hex;
+        $("modal-body").innerHTML = "";
+        const pre = document.createElement("pre");
+        pre.textContent = text.slice(0, 500000);
+        $("modal-body").appendChild(pre);
+      }
+    } catch (e) {
+      $("modal-body").innerHTML = `<div id="modal-msg">请求失败：${esc(String(e))}</div>`;
+    }
+  })();
+}
+
+function openSpine(it) {
+  openModal(it.rel + "（Spine 动画）", true);
+  $("btnDlBundle").href = "/api/download_bundle?path=" + encodeURIComponent(it.path);
+  const f = document.createElement("iframe");
+  f.id = "spineFrame";
+  f.src = "/spine_player.html?path=" + encodeURIComponent(it.path);
+  $("modal-body").appendChild(f);
+}
+
+$("btnClose").onclick = closeModal;
+$("mask").onclick = e => { if (e.target === $("mask")) closeModal(); };
+
+// ---------------- 版本对比 ----------------
+function fmtSnap(s) {
+  const d = new Date(s.created_at * 1000);
+  const pad = n => String(n).padStart(2, "0");
+  const t = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${s.id.slice(0,12)}… · ${t} · ${s.resources.toLocaleString()} 资源${s.source.includes("http") ? " · CDN" : " · 本地"}`;
+}
+
+async function loadSnapshots() {
+  snapshots = await (await fetch("/api/snapshots")).json();
+  const fill = (sel, idx) => {
+    sel.innerHTML = snapshots.map((s, i) => `<option value="${s.id}"${i === idx ? " selected" : ""}>${esc(fmtSnap(s))}</option>`).join("");
+  };
+  fill($("dFrom"), Math.max(0, snapshots.length - 2));
+  fill($("dTo"), snapshots.length - 1);
+  if (snapshots.length < 2) {
+    $("snapHint").textContent = "目前只有 1 份快照：游戏更新后执行 python catalog_viewer.py build --remote 即可产生第二份进行对比";
+  } else {
+    $("snapHint").textContent = "";
+  }
+}
+
+function diffParams(reset) {
+  const p = new URLSearchParams();
+  p.set("from", $("dFrom").value); p.set("to", $("dTo").value);
+  if ($("dStatus").value) p.set("status", $("dStatus").value);
+  if ($("dCategory").value) p.set("category", $("dCategory").value);
+  const q = $("dQ").value.trim();
+  if (q) p.set("q", q);
+  p.set("size", PAGE_SIZE);
+  p.set("page", dstate.page);
+  return p;
+}
+
+async function runCompare(reset) {
+  if (!$("dFrom").value || !$("dTo").value) return;
+  if (dstate.loading) return;
+  dstate.loading = true;
+  $("diffLoading").style.display = "block";
+  if (reset) { dstate.page = 1; dstate.done = false; $("diffRows").innerHTML = ""; }
+  else dstate.page += 1;
+  try {
+    const d = await (await fetch("/api/diff?" + diffParams().toString())).json();
+    if (d.error) { $("diff-info").textContent = d.error; return; }
+    dstate.from = d.from; dstate.to = d.to;
+    if (reset) {
+      $("diffSummary").style.display = "flex";
+      $("sumAdded").textContent = d.summary.added.toLocaleString();
+      $("sumRemoved").textContent = d.summary.removed.toLocaleString();
+      $("sumChanged").textContent = d.summary.changed.toLocaleString();
+    }
+    dstate.total = d.total;
+    $("diff-info").textContent = `当前筛选下 ${d.total.toLocaleString()} 条（共新增 ${d.summary.added} / 消失 ${d.summary.removed} / 换包 ${d.summary.changed}）`;
+    for (const it of d.items) appendDiffRow(it);
+    dstate.done = $("diffRows").children.length >= d.total;
+    $("diffMoreRow").style.display = dstate.done ? "none" : "";
+  } catch (e) {
+    $("diff-info").textContent = "对比失败：" + e;
+  } finally {
+    dstate.loading = false;
+    $("diffLoading").style.display = "none";
+  }
+}
+
+function appendDiffRow(it) {
+  const [dir, file] = pathSplit(it.rel);
+  let change;
+  if (it.status === "added") change = `<span class="hexchange to">+ ${esc((it.to_hex || "").slice(0,12))}…</span>`;
+  else if (it.status === "removed") change = `<span class="hexchange">− ${esc((it.from_hex || "").slice(0,12))}…</span>`;
+  else change = `<span class="hexchange">${esc((it.from_hex || "").slice(0,10))}… → <span class="to">${esc((it.to_hex || "").slice(0,10))}…</span></span>`;
+  const canPreview = (it.status !== "removed") && (it.kind === "image" || it.kind === "text" || it.kind === "spine");
+  const tr = document.createElement("tr");
+  tr.innerHTML =
+    `<td class="rel"><span class="dir">${esc(dir)}</span>${esc(file)}</td>` +
+    `<td><span class="tag st-${it.status}">${STATUS_LABEL[it.status]}</span></td>` +
+    `<td><span class="tag">${esc(it.category_label)}</span></td>` +
+    `<td>${change}</td>` +
+    `<td class="actions">${canPreview ? '<button class="pv">预览</button>' : ""}` +
+        `<button class="dl" title="下载 bundle">包</button></td>`;
+  if (canPreview) tr.querySelector(".pv").onclick = () => openPreview({
+    path: it.path, rel: it.rel, kind: it.kind,
+    bundle_hex: it.to_hex || it.from_hex, remote: it.remote,
+  });
+  tr.querySelector(".dl").onclick = () => downloadBundle(it.path);
+  $("diffRows").appendChild(tr);
+}
+
+$("btnCompare").onclick = () => runCompare(true);
+$("dStatus").onchange = () => runCompare(true);
+$("dCategory").onchange = () => runCompare(true);
+$("dQ").addEventListener("keydown", e => { if (e.key === "Enter") runCompare(true); });
+$("btnDiffMore").onclick = () => runCompare(false);
+
+// ---------------- 资源浏览事件 ----------------
+$("btnMore").onclick = () => loadPage(false);
+$("btnSearch").onclick = () => loadPage(true);
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") loadPage(true); });
+$("btnClear").onclick = () => {
+  $("q").value = ""; $("fCategory").value = ""; $("fKind").value = "";
+  state.bundle = ""; $("bundleFilter").style.display = "none";
+  loadPage(true);
+};
+$("btnClearBundle").onclick = () => {
+  state.bundle = ""; $("bundleFilter").style.display = "none"; loadPage(true);
+};
+$("fCategory").onchange = () => loadPage(true);
+$("fKind").onchange = () => loadPage(true);
+
+loadStats();
+loadCategories([$("fCategory"), $("dCategory")]);
+loadPage(true);
+</script>
+</body>
+</html>
