@@ -606,6 +606,12 @@ def spine_parts(skel_path: str):
             "SELECT path, rel, kind, bundle_hex FROM resources "
             "WHERE bundle_hex = ? AND kind = 'image' ORDER BY path",
             (skel["bundle_hex"],)).fetchall()]
+        # 同目录下的其他变体（ch_xxx_m0 → m0/m1/b/c/f 等），供前端切换
+        prefix = stem.rsplit("_", 1)[0] + "_"
+        siblings = [dict(r) for r in db.execute(
+            "SELECT path, rel FROM resources "
+            "WHERE path LIKE ? AND kind = 'spine' ORDER BY path",
+            (directory + "/" + prefix + "%.skel.bytes",)).fetchall()]
     finally:
         db.close()
 
@@ -615,8 +621,16 @@ def spine_parts(skel_path: str):
         return {"path": r["path"], "rel": r["rel"],
                 "url": "/api/raw?path=" + quote(r["path"])}
 
+    sibling_list = []
+    for s in siblings:
+        vstem = s["path"].rsplit("/", 1)[-1][:-len(".skel.bytes")]
+        variant = vstem[len(prefix):]
+        sibling_list.append({"variant": variant, "path": s["path"]})
+
     return {
         "name": stem,
+        "variant": stem[len(prefix):] if stem.startswith(prefix) else "",
+        "siblings": sibling_list,
         "bundle_hex": skel["bundle_hex"],
         "skel": to_part(skel),
         "atlas": to_part(atlas),

@@ -82,6 +82,8 @@
 <body>
 <div class="bar">
   <span class="title" id="title">加载中 ...</span>
+  <label>变体</label>
+  <select id="variantSel" style="min-width:100px;"></select>
   <label>皮肤</label>
   <select id="skin" style="min-width:120px;"></select>
   <span id="variantWrap" style="display:none;">
@@ -270,6 +272,26 @@ async function main() {
   if (!parts.atlas) return fail("该单元缺少 atlas 文本，无法渲染");
   if (!parts.textures.length) return fail("该单元缺少贴图，无法渲染");
   $("title").textContent = parts.name;
+
+  // 变体切换下拉（同角色的 m0/m1/b/c/f 等），切换时带新 path 重载页面
+  const vSel = $("variantSel");
+  if (parts.siblings && parts.siblings.length > 1 && vSel.options.length === 0) {
+    const VARIANT_NAME = {m0: "常服", m1: "战斗服"};
+    for (const s of parts.siblings) {
+      const o = document.createElement("option");
+      o.value = s.path;
+      o.textContent = s.variant.toUpperCase() +
+        (VARIANT_NAME[s.variant] ? " " + VARIANT_NAME[s.variant] : "");
+      if (s.variant === parts.variant) o.selected = true;
+      vSel.appendChild(o);
+    }
+    vSel.onchange = () => {
+      location.search = "?path=" + encodeURIComponent(vSel.value);
+    };
+  } else {
+    vSel.style.display = "none";
+    vSel.previousElementSibling.style.display = "none"; // 隐藏"变体"标签
+  }
 
   // 与 skel/atlas/贴图下载同时启动 bundle 进度轮询（首次播放后端要从 CDN 下载整个 bundle）
   if (parts.bundle_hex) pollBundle(parts.bundle_hex);
