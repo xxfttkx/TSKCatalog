@@ -418,8 +418,24 @@ def _bundle_lock(hexname: str):
         return lk
 
 
+# bundle 下载进度：hexname -> {status, loaded, total}
+# status: downloading / done / error（重启后清空，只服务于实时展示）
+_bundle_progress = {}
+_bundle_progress_lock = threading.Lock()
+
+
+def _set_bundle_progress(hexname: str, **fields):
+    with _bundle_progress_lock:
+        _bundle_progress.setdefault(hexname, {}).update(fields)
+
+
+def get_bundle_progress(hexname: str) -> dict:
+    with _bundle_progress_lock:
+        return dict(_bundle_progress.get(hexname) or {})
+
+
 def get_bundle_bytes(hexname: str, remote: bool):
-    """返回 bundle 字节。远程包下载后缓存到 catalog_cache/。"""
+    """返回 bundle 字节。远程包分块下载并缓存到 catalog_cache/，同时更新下载进度。"""
     local_path = BUNDLE_CACHE_DIR / f"{hexname}.bundle"
     if local_path.exists() and local_path.stat().st_size > 0:
         return local_path.read_bytes(), True
@@ -430,12 +446,30 @@ def get_bundle_bytes(hexname: str, remote: bool):
                 return local_path.read_bytes(), True
             url = CDN_BASE + quote(hexname) + ".bundle"
             req = urllib.request.Request(url, headers=UA)
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                blob = resp.read()
+            try:
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    total = int(resp.headers.get("Content-Length", 0) or 0)
+                    _set_bundle_progress(hexname, status="downloading",
+                                         loaded=0, total=total)
+                    chunks = []
+                    loaded = 0
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        loaded += len(chunk)
+                        _set_bundle_progress(hexname, loaded=loaded)
+                    blob = b"".join(chunks)
+            except Exception:
+                _set_bundle_progress(hexname, status="error")
+                raise
             BUNDLE_CACHE_DIR.mkdir(exist_ok=True)
             tmp = local_path.with_suffix(".bundle.tmp")
             tmp.write_bytes(blob)
             os.replace(tmp, local_path)
+            _set_bundle_progress(hexname, status="done",
+                                 loaded=len(blob), total=total or len(blob))
             return blob, False
     # 内置 bundle：尝试 StandaloneWindows64
     builtin = STANDALONE_DIR / f"{hexname}.bundle"
@@ -583,6 +617,7 @@ def spine_parts(skel_path: str):
 
     return {
         "name": stem,
+        "bundle_hex": skel["bundle_hex"],
         "skel": to_part(skel),
         "atlas": to_part(atlas),
         "textures": [to_part(t) for t in textures],
@@ -667,6 +702,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_raw(qs)
             if route == "/api/spine_parts":
                 return self.api_spine_parts(qs)
+            if route == "/api/bundle_progress":
+                return self.api_bundle_progress(qs)
             if route == "/api/snapshots":
                 return self.api_snapshots()
             if route == "/api/diff":
@@ -800,6 +837,17 @@ class Handler(BaseHTTPRequestHandler):
         if not path:
             return self._json({"error": "缺少 path 参数"}, 400)
         self._json(spine_parts(path))
+
+    def api_bundle_progress(self, qs):
+        hexname = qs.get("hex", [""])[0].strip()
+        if not hexname:
+            return self._json({"error": "缺少 hex 参数"}, 400)
+        progress = get_bundle_progress(hexname)
+        if not progress:
+            # 没有记录：可能已缓存/内置（无需下载），或下载尚未开始
+            self._json({"status": "unknown"})
+            return
+        self._json(progress)
 
     def api_snapshots(self):
         self._json(list_snapshots())
