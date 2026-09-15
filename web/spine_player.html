@@ -83,7 +83,11 @@
 <div class="bar">
   <span class="title" id="title">加载中 ...</span>
   <label>皮肤</label>
-  <select id="skin" style="min-width:160px;"></select>
+  <select id="skin" style="min-width:120px;"></select>
+  <span id="variantWrap" style="display:none;">
+    <label>表情</label>
+    <select id="variant" style="min-width:90px;"></select>
+  </span>
   <label>动画</label>
   <select id="anim" style="min-width:180px;"></select>
   <button id="btnPause">暂停</button>
@@ -335,19 +339,64 @@ async function main() {
     animSel.appendChild(o);
   }
 
-  // ---- 皮肤（Skin）列表：表情通常以 skin 形式存在 ----
-  // skins 是 Skin 对象数组；default 永远在首位，其余按名字排序
-  const skinNames = skeletonData.skins.map(s => s.name);
+  // ---- 皮肤（Skin）----
+  // 该游戏的角色 spine 用"基础皮肤 + 变体皮肤"组织：
+  //   default 覆盖身体全部 slot（头发/衣服/身体/鼻子），
+  //   face1/face2/... 只覆盖 face_eye、face_mouth 等几个脸部 slot。
+  // 变体不能直接 setSkin 替换（否则身体消失），必须用 Skin.addSkin 叠加到基础皮肤上。
+  const allSkins = skeletonData.skins;
   const skinSel = $("skin");
-  // 没有 default 时也要补一个，便于回到初始状态
-  if (!skinNames.includes("default")) skinNames.unshift("default");
-  for (const n of skinNames) {
+  const variantSel = $("variant");
+
+  function skinSlotCount(skin) {
+    return new Set(skin.getAttachments().map(e => e.slotIndex)).size;
+  }
+
+  let baseSkins = [];   // 完整皮肤（整体替换）
+  let variantSkins = []; // 变体皮肤（叠加，如表情）
+  if (allSkins.length) {
+    // 覆盖 slot 最多的作为基础皮肤（通常是 default）
+    const baseSkin = allSkins.reduce(
+      (a, b) => skinSlotCount(b) > skinSlotCount(a) ? b : a, allSkins[0]);
+    const baseCount = skinSlotCount(baseSkin);
+    for (const s of allSkins) {
+      if (s === baseSkin) continue;
+      // 覆盖 slot 数明显更少（不超过基础的一半，且最多几个）→ 视为变体
+      if (skinSlotCount(s) <= Math.max(3, Math.floor(baseCount * 0.5))) {
+        variantSkins.push(s);
+      }
+    }
+    baseSkins = [baseSkin, ...allSkins.filter(
+      s => s !== baseSkin && !variantSkins.includes(s))];
+  }
+
+  for (const s of baseSkins) {
     const o = document.createElement("option");
-    o.value = n; o.textContent = n === "default" ? "默认" : n;
+    o.value = s.name;
+    o.textContent = s.name === "default" ? "默认" : s.name;
     skinSel.appendChild(o);
   }
-  function setSkin(name) {
-    skeleton.setSkinByName(name);
+  if (variantSkins.length) {
+    $("variantWrap").style.display = "";
+    variantSel.appendChild(new Option("无", ""));
+    for (const s of variantSkins) {
+      variantSel.appendChild(new Option(s.name, s.name));
+    }
+    // 打开即带脸：默认选第一个表情
+    variantSel.value = variantSkins[0].name;
+  }
+
+  function applySkin() {
+    if (!allSkins.length) return;
+    const base = allSkins.find(s => s.name === skinSel.value);
+    // 组合一个临时皮肤：基础皮肤 + 选中的变体（表情）
+    const combined = new spine.Skin("__preview_combined__");
+    if (base) combined.addSkin(base);
+    if (variantSel.value) {
+      const v = allSkins.find(s => s.name === variantSel.value);
+      if (v) combined.addSkin(v);
+    }
+    skeleton.setSkin(combined);
     // 切 skin 后必须重置姿势并重新 apply，否则附件不会刷新
     skeleton.setSlotsToSetupPose();
     state.apply(skeleton);
@@ -448,7 +497,8 @@ async function main() {
   canvas.addEventListener("dblclick", () => fitView());
 
   animSel.addEventListener("change", () => setAnim(animSel.value));
-  skinSel.addEventListener("change", () => setSkin(skinSel.value));
+  skinSel.addEventListener("change", applySkin);
+  variantSel.addEventListener("change", applySkin);
   $("btnPause").onclick = function () {
     paused = !paused;
     this.textContent = paused ? "继续" : "暂停";
@@ -467,6 +517,8 @@ async function main() {
   // ---- 主循环 ----
   resize();
   applyBg();
+  // 应用默认皮肤组合（基础皮肤 + 第一个表情），打开角色即有人脸
+  applySkin();
   setAnim(animNames.length ? animNames[0] : "");
   $("msg").style.display = "none";
 
