@@ -320,6 +320,7 @@
     </div>
     <div id="modal-body"></div>
     <div id="modal-foot">
+      <a id="btnDlText" hidden><button>下载文本</button></a>
       <a id="btnDlBundle"><button>下载整个 bundle</button></a>
     </div>
   </div>
@@ -458,6 +459,15 @@ function openPreview(it) {
   if (it.kind === "spine") return openSpine(it);
   openModal(it.rel, false);
   $("btnDlBundle").href = "/api/download_bundle?path=" + encodeURIComponent(it.path);
+  const dlText = $("btnDlText");
+  if (it.kind === "text") {
+    dlText.hidden = false;
+    dlText.href = "/api/raw?path=" + encodeURIComponent(it.path);
+    dlText.setAttribute("download", it.name || it.rel.split("/").pop() || "text.txt");
+  } else {
+    dlText.hidden = true;
+    dlText.removeAttribute("download");
+  }
   if (it.kind !== "image" && it.kind !== "text") {
     $("modal-body").innerHTML = `<div id="modal-msg">该类型（${KIND_LABEL[it.kind] || it.kind}）不支持网页预览，请下载 bundle。</div>`;
     return;
@@ -499,6 +509,7 @@ function openPreview(it) {
 function openSpine(it) {
   openModal(it.rel + "（Spine 动画）", true);
   $("btnDlBundle").href = "/api/download_bundle?path=" + encodeURIComponent(it.path);
+  $("btnDlText").hidden = true;
   const f = document.createElement("iframe");
   f.id = "spineFrame";
   f.src = "/spine_player.html?path=" + encodeURIComponent(it.path);
