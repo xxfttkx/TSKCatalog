@@ -7,6 +7,7 @@ __pycache__/
 # 自动生成的索引和缓存（build 后自动重建）
 catalog_index.db
 catalog_index.db.tmp
+catalog_meta.json
 catalog_cache/
 snapshots/
 
