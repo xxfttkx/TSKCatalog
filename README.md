@@ -11,7 +11,7 @@
 - **内联预览**：图片、文本资源在网页内直接预览；Spine 资源调用内置 Spine 4.0 WebGL 播放器渲染动画。
 - **Bundle 下载**：远程 bundle 自动从 CDN 下载并缓存到本地 `catalog_cache/`，内置 bundle 直接读取游戏目录；支持下载整个 bundle。
 - **版本快照与对比**：每次构建索引时自动保存一份全量快照，可在网页上选择两个快照进行 diff（新增 / 消失 / 换包）。
-- **远程更新预检**：`status` 子命令用 HEAD 请求对比 ETag / Last-Modified，秒级判断 CDN 上的 catalog 是否有更新，避免盲下 58MB JSON。
+- **远程更新预检**：`build --remote` 会先发 HEAD 请求对比 ETag / Last-Modified，远程未变化则直接跳过，避免盲下 58MB JSON；加 `--force` 可跳过预检强制下载重建。
 
 ## 项目结构
 
@@ -63,11 +63,11 @@ python catalog_viewer.py
 # 仅构建索引（解析本地 catalog.bundle）
 python catalog_viewer.py build
 
-# 从 CDN 拉取最新 catalog JSON 后构建（同时生成版本快照）
+# 从 CDN 拉取最新 catalog：先 HEAD 预检，远程未变化则跳过下载（同时生成版本快照）
 python catalog_viewer.py build --remote
 
-# 检查远程 catalog 是否有更新（HEAD 请求，不下载内容）
-python catalog_viewer.py status
+# 跳过更新检查，强制下载并重建索引
+python catalog_viewer.py build --remote --force
 
 # 启动网页服务
 python catalog_viewer.py serve
@@ -108,5 +108,5 @@ python catalog_viewer.py serve --port 9000
 - 远程 bundle 首次访问时下载到 `catalog_cache/`，后续直接从缓存读取。
 - Spine 运行时仅内置 4.0 版本；若资源版本不匹配，页面会提示下载 bundle 后用对应版本 Spine 编辑器查看。
 - `catalog_index.db` 与 `snapshots/*.db` 为自动生成的中间产物，删除后可通过 `build` 重新生成。
-- `status` 命令受 CloudFront 边缘节点刷新延迟影响——若报告"未变化"但怀疑有更新，过几分钟再试或切换网络环境。
-  首次使用 `status` 前需先运行过一次 `build --remote` 以生成基线 `catalog_meta.json`，否则只会提示"无本地基线"。
+- `build --remote` 的 HEAD 预检受 CloudFront 边缘节点刷新延迟影响——若报告"未变化"但怀疑有更新，过几分钟再试、切换网络环境，或直接加 `--force`。
+  首次运行 `build --remote` 时本地无基线 `catalog_meta.json`，会直接下载并在完成后自动生成基线；之后的运行才会进行预检。

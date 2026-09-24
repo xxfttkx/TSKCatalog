@@ -6,7 +6,8 @@
 用法:
     python catalog_viewer.py                # 首次自动构建索引并启动服务
     python catalog_viewer.py build          # 仅构建索引（解析本地 catalog.bundle）
-    python catalog_viewer.py build --remote # 从 CDN 拉取最新 catalog JSON 后构建
+    python catalog_viewer.py build --remote # HEAD 预检，远程有更新才下载并构建
+    python catalog_viewer.py build --remote --force  # 跳过预检，强制下载重建
     python catalog_viewer.py serve          # 启动网页 (http://127.0.0.1:8771)
     python catalog_viewer.py serve --port 9000
 
@@ -237,8 +238,25 @@ def build_resolver(paths, entries, buckets):
 # 索引构建（SQLite）
 # ---------------------------------------------------------------------------
 
-def build_index(use_remote: bool):
+def build_index(use_remote: bool, force: bool = False):
+    remote_headers = {}
     if use_remote:
+        local_meta = load_local_meta()
+        if not force:
+            if local_meta:
+                print("正在 HEAD 请求远程 catalog 检查更新 ...")
+                try:
+                    remote = fetch_remote_meta()
+                    if (remote.get("etag") == local_meta.get("etag")
+                            and remote.get("last_modified") == local_meta.get("last_modified")):
+                        print("远程 catalog 未变化（ETag / Last-Modified 与本地一致），跳过下载。")
+                        print("如需强制重建索引: python catalog_viewer.py build --remote --force")
+                        return
+                    print("检测到远程更新，开始下载 ...")
+                except Exception as e:
+                    print(f"HEAD 预检失败（{e}），改为直接下载 ...")
+            else:
+                print("本地无远程基线，首次下载 ...")
         print("正在从 CDN 下载最新 catalog JSON ...")
         req = urllib.request.Request(REMOTE_CATALOG_JSON, headers=UA)
         with urllib.request.urlopen(req, timeout=300) as resp:
@@ -301,6 +319,7 @@ def build_index(use_remote: bool):
     print(f"索引: {INDEX_DB}")
     create_snapshot(catalog_md5, source, len(rows))
     if use_remote:
+        meta_existed = CATALOG_META.exists()
         save_local_meta({
             "etag": remote_headers.get("ETag"),
             "last_modified": remote_headers.get("Last-Modified"),
@@ -308,6 +327,8 @@ def build_index(use_remote: bool):
             "catalog_md5": catalog_md5,
             "built_at": datetime.datetime.now().isoformat(timespec="seconds"),
         })
+        if not meta_existed:
+            print(f"已补全本地基线记录: {CATALOG_META.name}")
 
 
 # ---------------------------------------------------------------------------
@@ -371,57 +392,6 @@ def save_local_meta(meta: dict):
     CATALOG_META.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-
-
-def check_remote_status():
-    """对比远程 catalog 与本地 catalog_meta.json，判断是否有更新。"""
-    print("正在 HEAD 请求远程 catalog ...")
-    try:
-        remote = fetch_remote_meta()
-    except Exception as e:
-        print(f"检查失败: {e}")
-        return
-
-    def fmt_size(s):
-        if not s:
-            return "未知"
-        try:
-            return f"{s} ({int(s) / 1048576:.2f} MB)"
-        except ValueError:
-            return s
-
-    print("\n远程:")
-    print(f"  ETag:           {remote.get('etag')}")
-    print(f"  Last-Modified:  {remote.get('last_modified')}")
-    print(f"  Content-Length: {fmt_size(remote.get('content_length'))}")
-
-    local = load_local_meta()
-    if not local:
-        print("\n本地无记录（尚未运行过 build --remote）")
-        print("\n状态: 远程有更新（无本地基线）")
-        print("建议: python catalog_viewer.py build --remote")
-        return
-
-    print(f"\n本地记录（上次 build --remote 时）:")
-    print(f"  ETag:           {local.get('etag')}")
-    print(f"  Last-Modified:  {local.get('last_modified')}")
-    print(f"  Content-Length: {fmt_size(local.get('content_length'))}")
-    print(f"  快照 md5:       {local.get('catalog_md5')}")
-    print(f"  记录时间:       {local.get('built_at')}")
-
-    r_etag, r_lm = remote.get("etag"), remote.get("last_modified")
-    l_etag, l_lm = local.get("etag"), local.get("last_modified")
-
-    print()
-    if r_etag == l_etag and r_lm == l_lm:
-        print("状态: 远程未变化（与本地记录一致）")
-    else:
-        print("状态: 远程有更新")
-        if r_lm != l_lm:
-            print(f"  Last-Modified: {l_lm}  ->  {r_lm}")
-        if r_etag != l_etag:
-            print(f"  ETag:          {l_etag}  ->  {r_etag}")
-        print("建议: python catalog_viewer.py build --remote")
 
 
 def list_snapshots():
@@ -1153,16 +1123,14 @@ def main():
     sub = ap.add_subparsers(dest="cmd")
     p_build = sub.add_parser("build", help="构建资源索引")
     p_build.add_argument("--remote", action="store_true", help="从 CDN 拉取最新 catalog")
+    p_build.add_argument("--force", action="store_true",
+                         help="与 --remote 连用：跳过更新检查，强制下载并重建")
     p_serve = sub.add_parser("serve", help="启动网页服务")
     p_serve.add_argument("--port", type=int, default=DEFAULT_PORT)
-    sub.add_parser("status", help="检查远程 catalog 是否有更新（HEAD 请求）")
     args = ap.parse_args()
 
     if args.cmd == "build":
-        build_index(use_remote=args.remote)
-        return
-    if args.cmd == "status":
-        check_remote_status()
+        build_index(use_remote=args.remote, force=args.force)
         return
     if args.cmd == "serve":
         ensure_index()
