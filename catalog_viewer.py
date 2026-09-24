@@ -242,22 +242,47 @@ def build_index(use_remote: bool, force: bool = False):
     remote_headers = {}
     if use_remote:
         local_meta = load_local_meta()
-        if not force:
-            if local_meta:
-                print("正在 HEAD 请求远程 catalog 检查更新 ...")
-                try:
-                    remote = fetch_remote_meta()
-                    if (remote.get("etag") == local_meta.get("etag")
-                            and remote.get("last_modified") == local_meta.get("last_modified")):
-                        print("远程 catalog 未变化（ETag / Last-Modified 与本地一致），跳过下载。")
-                        print("如需强制重建索引: python catalog_viewer.py build --remote --force")
-                        return
-                    print("检测到远程更新，开始下载 ...")
-                except Exception as e:
-                    print(f"HEAD 预检失败（{e}），改为直接下载 ...")
-            else:
-                print("本地无远程基线，首次下载 ...")
-        print("正在从 CDN 下载最新 catalog JSON ...")
+        if not force and local_meta:
+            print("正在 HEAD 请求远程 catalog 检查更新 ...")
+            try:
+                remote = fetch_remote_meta()
+            except Exception as e:
+                print(f"HEAD 预检失败（{e}），改为直接下载 ...")
+                remote = None
+            if remote is not None:
+                def fmt_size(s):
+                    try:
+                        return f"{s} ({int(s) / 1048576:.2f} MB)"
+                    except (ValueError, TypeError):
+                        return s or "未知"
+
+                print("\n远程:")
+                print(f"  ETag:           {remote.get('etag')}")
+                print(f"  Last-Modified:  {remote.get('last_modified')}")
+                print(f"  Content-Length: {fmt_size(remote.get('content_length'))}")
+
+                print("\n本地记录（上次 build --remote 时）:")
+                print(f"  ETag:           {local_meta.get('etag')}")
+                print(f"  Last-Modified:  {local_meta.get('last_modified')}")
+                print(f"  Content-Length: {fmt_size(local_meta.get('content_length'))}")
+                print(f"  快照 md5:       {local_meta.get('catalog_md5')}")
+                print(f"  记录时间:       {local_meta.get('built_at')}")
+
+                r_etag, r_lm = remote.get("etag"), remote.get("last_modified")
+                l_etag, l_lm = local_meta.get("etag"), local_meta.get("last_modified")
+                print()
+                if r_etag == l_etag and r_lm == l_lm:
+                    print("状态: 远程未变化（与本地记录一致），跳过下载。")
+                    print("如需强制重建索引: python catalog_viewer.py build --remote --force")
+                    return
+                print("状态: 远程有更新，开始下载 ...")
+                if r_lm != l_lm:
+                    print(f"  Last-Modified: {l_lm}  ->  {r_lm}")
+                if r_etag != l_etag:
+                    print(f"  ETag:          {l_etag}  ->  {r_etag}")
+        elif not force:
+            print("本地无远程基线，首次下载 ...")
+        print("\n正在从 CDN 下载最新 catalog JSON ...")
         req = urllib.request.Request(REMOTE_CATALOG_JSON, headers=UA)
         with urllib.request.urlopen(req, timeout=300) as resp:
             catalog_bytes = resp.read()
